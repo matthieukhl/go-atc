@@ -2,4 +2,5 @@
 .env
 config.yaml 
 
-
+# Docker compose
+docker-compose.yml
