@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -11,6 +12,9 @@ import (
 )
 
 var docStyle = lipgloss.NewStyle().Margin(1, 2)
+var baseStyle = lipgloss.NewStyle().
+	BorderStyle(lipgloss.NormalBorder()).
+	BorderForeground(lipgloss.Color("240"))
 
 type item struct {
 	option int
@@ -27,8 +31,9 @@ type appState int
 const (
 	menu appState = iota
 	checkFlight
-	flightDepartures
+	flightDeparturesInput
 	flightArrivals
+	flightDeparturesTable
 )
 
 type model struct {
@@ -38,6 +43,7 @@ type model struct {
 	// Components
 	textInput textinput.Model
 	list      list.Model
+	table     table.Model
 
 	// HTTP Client
 	client internal.Client
@@ -49,6 +55,7 @@ func initialModel() model {
 	items := []list.Item{
 		item{option: 1, title: "Get flight information.", desc: "Display real-time information of a flight."},
 		item{option: 2, title: "Get flight schedule from airport.", desc: "Display flight schedule of an airport."},
+		item{option: 4, title: "Flight departures", desc: "Flight departures"},
 	}
 
 	m := model{
@@ -79,11 +86,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch m.appState {
 	case menu:
-		// On laisse la list gérer la navigation (up/down, etc.)
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
 
-		// On intercepte Enter pour décider si on bascule en inputState
 		if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyEnter {
 			switch m.list.SelectedItem().(item).option {
 			case 1:
@@ -95,7 +100,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.Focus()
 				return m, textinput.Blink
 			case 2:
-				m.appState = flightDepartures
+				m.appState = flightDeparturesInput
 				m.textInput.Placeholder = "LFPG"
 				m.textInput.CharLimit = 156
 				m.textInput.Width = 20
@@ -126,7 +131,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput, cmd = m.textInput.Update(msg)
 		return m, cmd
 
-	case flightDepartures:
+	case flightDeparturesInput:
 		if key, ok := msg.(tea.KeyMsg); ok {
 			switch key.Type {
 			case tea.KeyEsc:
@@ -134,10 +139,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.Blur()
 				return m, nil
 			case tea.KeyEnter:
-				err := internal.GetFlightDepartures(m.client, m.textInput.Value())
+				m.textInput.Blur()
+				rows, err := internal.GetFlightDepartures(m.client, m.textInput.Value())
 				if err != nil {
 					log.Fatal(err)
 				}
+				m.appState = flightDeparturesTable
+				columns := []table.Column{
+					{Title: "ICAO24", Width: 4},
+					{Title: "Callsign", Width: 10},
+					{Title: "Departure Airport", Width: 10},
+					{Title: "Arrival Airport", Width: 10},
+				}
+				t := table.New(
+					table.WithColumns(columns),
+					table.WithRows(rows),
+					table.WithFocused(true),
+					table.WithHeight(7),
+				)
+				s := table.DefaultStyles()
+				s.Header = s.Header.
+					BorderStyle(lipgloss.NormalBorder()).
+					BorderForeground(lipgloss.Color("240")).
+					BorderBottom(true).
+					Bold(false)
+				s.Selected = s.Selected.
+					Foreground(lipgloss.Color("229")).
+					Background(lipgloss.Color("57")).
+					Bold(false)
+				t.SetStyles(s)
+
+				m.table = t
 				return m, nil
 			}
 
@@ -145,6 +177,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput, cmd = m.textInput.Update(msg)
 			return m, cmd
 		}
+
+	case flightDeparturesTable:
+		var cmd tea.Cmd
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "esc":
+				if m.table.Focused() {
+					m.table.Blur()
+				} else {
+					m.table.Focus()
+				}
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "enter":
+				return m, tea.Batch(
+					tea.Printf("Let's go to %s!", m.table.SelectedRow()[1]),
+				)
+			}
+		}
+		m.table, cmd = m.table.Update(msg)
+		return m, cmd
 	}
 
 	return m, nil
@@ -162,10 +216,13 @@ func (m model) View() string {
 				m.textInput.View(),
 		)
 
-	case flightDepartures:
+	case flightDeparturesInput:
 		return docStyle.Render(
 			"Enter airport ICAO (Esc to cancel)\n\n" + m.textInput.View(),
 		)
+	case flightDeparturesTable:
+		return baseStyle.Render(m.table.View()) + "\n"
+
 	}
 
 	return docStyle.Render(m.list.View())

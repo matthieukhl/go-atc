@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/matthieukhl/go-atc/internal/models"
 )
 
@@ -16,7 +17,7 @@ const (
 	departuresEndpoint = "/flights/departure/"
 )
 
-func GetFlightDepartures(client Client, airportICAO string) error {
+func GetFlightDepartures(client Client, airportICAO string) ([]table.Row, error) {
 
 	// Query params
 	begin := time.Now().UTC().AddDate(0, 0, -1).Unix()
@@ -26,7 +27,7 @@ func GetFlightDepartures(client Client, airportICAO string) error {
 
 	reqUrl, err := url.Parse(endpoint)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Add query parameters
@@ -35,8 +36,6 @@ func GetFlightDepartures(client Client, airportICAO string) error {
 	query.Add("begin", strconv.Itoa(int(begin)))
 	query.Add("end", strconv.Itoa(int(end)))
 	reqUrl.RawQuery = query.Encode()
-	fmt.Println(reqUrl.String())
-	fmt.Println(client.Config.OpenSkyApiKey)
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl.String(), nil)
 
@@ -45,21 +44,28 @@ func GetFlightDepartures(client Client, airportICAO string) error {
 
 	resp, err := client.HTTPClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if resp.StatusCode > 299 {
+		// TODO: improve logging
 		fmt.Printf("Error with status code: %d %s\n", resp.StatusCode, string(data))
 	}
 
 	departures := []models.Departure{}
 	err = json.Unmarshal(data, &departures)
 
-	return nil
+	rows := []table.Row{}
+
+	for _, dep := range departures {
+		rows = append(rows, []string{dep.Icao24, dep.Callsign, dep.EstDepartureAirport, dep.EstArrivalAirport})
+	}
+
+	return rows, nil
 }
