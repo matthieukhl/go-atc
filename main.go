@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/matthieukhl/go-atc/internal"
 )
 
 var docStyle = lipgloss.NewStyle().Margin(1, 2)
@@ -20,13 +21,6 @@ type item struct {
 func (i item) Title() string       { return i.title }
 func (i item) Description() string { return i.desc }
 func (i item) FilterValue() string { return i.title }
-
-func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		log.Fatal(err)
-	}
-}
 
 type appState int
 
@@ -45,6 +39,9 @@ type model struct {
 	textInput textinput.Model
 	list      list.Model
 
+	// HTTP Client
+	client internal.Client
+
 	err error
 }
 
@@ -58,6 +55,7 @@ func initialModel() model {
 		appState:  menu,
 		textInput: textinput.New(),
 		list:      list.New(items, list.NewDefaultDelegate(), 0, 0),
+		client:    internal.NewClient(),
 		err:       nil,
 	}
 	m.list.Title = "Go ATC"
@@ -136,8 +134,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.Blur()
 				return m, nil
 			case tea.KeyEnter:
-				m.appState = menu
-				m.textInput.Blur()
+				err := internal.GetFlightDepartures(m.client, m.textInput.Value())
+				if err != nil {
+					log.Fatal(err)
+				}
 				return m, nil
 			}
 
@@ -169,4 +169,11 @@ func (m model) View() string {
 	}
 
 	return docStyle.Render(m.list.View())
+}
+
+func main() {
+	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		log.Fatal(err)
+	}
 }
